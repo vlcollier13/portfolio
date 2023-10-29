@@ -1,0 +1,1651 @@
+---
+title: "Examining the Effects of Disinformation on Electoral Violence"
+author: "V. Collier"
+date: "2022-07-13"
+output:
+  pdf_document: default
+  html_document: default
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(knitr.duplicate.label = "allow")
+```
+
+```{r LIBRARIES, include=FALSE}
+
+library(AER)
+library(caret)
+library(corrplot)
+library(ExPanDaR)
+library(crosstalk)
+library(devtools)
+library(DT)
+library(forcats)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+library(gtools)
+library(htmlwidgets)
+library(janitor)
+library(kableExtra)
+library(leaflet)
+library(lubridate)
+library(mlbench)
+library(olsrr)
+library(packrat)
+library(plotly)
+library(psych)
+library(readr)
+library(readxl)
+library(rio)
+library(rsconnect)
+library(shiny)
+library(stringr)
+library(tidyverse)
+library(xts)
+library(plm)
+library(stargazer)
+library(party)
+library(olsrr)
+library(jtools)
+library(moments)
+library(lmtest)
+library(ggplot2)
+library(dplyr)
+library(plm)
+library(lfe)
+library(lmtest)
+library(car)
+library(geepack)
+library(bookdown)
+library(tufte)
+library(rticles)
+library(semTools)
+library(lavaan)
+```
+
+```{r IMPORT, echo=FALSE,include=FALSE}
+vdem_df <- readRDS("V-Dem_12.rds")
+
+# Variable Definitions
+vdem_vars <- read_csv("Variables.csv")
+
+# import variable descriptions
+my_var_def <- read_csv("Variables.csv", trim_ws = TRUE, skip_empty_rows = TRUE)
+
+my_var_def_list <- my_var_def$var_name
+
+print(my_var_def_list)
+
+
+```
+
+```{r DATA CLEANING, echo=FALSE,include=FALSE}
+
+# revise df
+vdem_df2 <- vdem_df[my_var_def_list]
+
+# Limit data to > 2000
+vdem_df2 <- vdem_df2 %>% filter(year>=2000)
+
+# Convert country to factor
+vdem_df2$country_name <- as_factor(vdem_df2$country_name)   
+
+# Convert year to integer
+vdem_df2$year <- as.integer(vdem_df2$year)
+
+
+## Reverse Coding ----
+# (to align disinformation variables and v2elpeace with others in dataset)
+recode_list <- c("v2elpeace_ord",'v2smpolsoc_ord',"v2smgovdom_ord","v2smgovab_ord","v2smpardom_ord","v2smparab_ord","v2smfordom_ord","v2smforads_ord")
+
+# Mutate across disinfo_list
+
+vdem_df2 <- vdem_df2 %>%
+  mutate(across(all_of(recode_list), ~ recode(., '0'= 4, '1' = 3, '2' =2, '3' = 1, '4'= 0)))
+
+# Merge disinformation variables to create one holistic variable
+vdem_df2 <- vdem_df2 %>% 
+  mutate(disinfo_agg = mapply(sum,v2smgovdom_ord,v2smgovab_ord,v2smpardom_ord,v2smparab_ord,v2smfordom_ord,v2smforads_ord)) 
+
+# Repeat for median 
+vdem_df2 <- vdem_df2 %>% 
+  mutate(disinfo_median = mapply(median,v2smgovdom_ord,v2smgovab_ord,v2smpardom_ord,v2smparab_ord,v2smfordom_ord,v2smforads_ord))
+
+# Verify structure
+str(vdem_df2)  
+
+# Remove extraneous disinfo variables and disinfo_agg
+
+remove1 <- c("v2smgovdom_ord","v2smgovab_ord","v2smpardom_ord","v2smparab_ord","v2smfordom_ord","v2smforads_ord", "disinfo_agg")
+vdem_df2 <- vdem_df2 %>% dplyr::select(-c(v2smgovdom_ord,v2smgovab_ord,v2smpardom_ord,v2smparab_ord,v2smfordom_ord,v2smforads_ord, disinfo_agg))
+
+
+# create copy for map without NA removal or filters
+vdem_map <- vdem_df2
+
+# Limit to countries that hold elections that have online media existence
+vdem <- vdem_df2 %>% filter(v2x_regime != 0)
+
+# remove NAs for calculations
+vdem <- na.omit(vdem) 
+
+```
+
+```{r Label Creation, echo=FALSE}
+
+vars1 <- c("sqrt_peace","v2elpeace_ord","country_name","country_text_id","year", "country_id",'v2x_regime',"v2smpolhate_ord","v2smpolsoc_ord",
+
+           "v2smgovfilcap_ord", "v2smgovfilprc_ord",   
+           "v2smgovshut_ord" ,    "v2smgovsm_ord" ,
+           "v2smgovsmmon_ord","v2smgovsmcenprc_ord","v2smgovcapsec_ord",  "v2smregcap_ord" ,     "v2smregapp_ord" ,     "v2smarrest_ord",     
+"v2smonex_ord",        "disinfo_median")
+
+vars2 <- c('Electoral Violence','Electoral Violence', 'Country','Country Text ID','Year','Country ID','Regime Type','Social Media Hate Speech','Polarization','Gov Internet Filtering Cap','Gov Internet Filtering Practice', 'Gov Internet Shutdown','Gov Social Media Shutdown','Gov Social Media Monitoring','Gov Social Media Censorship','Gov Cyber Security Capacity', 'Gov Capacity to Regulate Content','Gov Content Regulation Approach','Arrests for Political Content','Online Media Consumption','Disinformation'
+           )
+
+  
+# merge
+label_matrix <- cbind(vars1, vars2)
+
+# as dataframe
+label_matrix <- as_data_frame(label_matrix)
+
+```
+
+
+```{r FEATURE SELECTION, echo=FALSE,include=FALSE}
+
+# ensure the results are repeatable
+set.seed(7)
+
+# Remove redundant features
+
+## Correlation Matrix ----
+# calculate correlation matrix
+
+vdem_cor <- vdem %>% subset(select= -c(year,country_name,country_id,country_text_id))
+
+cor_matrix = cor(vdem_cor) 
+
+# find attributes that are highly corrected (ideally >0.75)
+highlyCorrelated <- findCorrelation(cor_matrix, cutoff=0.5)
+# print indexes of highly correlated attributes
+print(highlyCorrelated)
+
+# CORRPLOT
+corrplot(cor_matrix)
+
+# as number
+
+
+
+M <- cor(vdem_cor) 
+
+colnames(M) <- c('Electoral Violence','Regime Type','Social Media Hate Speech','Polarization','Gov Internet Filtering Cap','Gov Internet Filtering Practice', 'Gov Internet Shutdown','Gov Social Media Shutdown','Gov Social Media Monitoring','Gov Social Media Censorship','Gov Cyber Security Capacity', 'Gov Capacity to Regulate Content','Gov Content Regulation Approach','Arrests for Political Content','Online Media Consumption','Disinformation')
+
+rownames(M) <- c('Electoral Violence','Regime Type','Social Media Hate Speech','Polarization','Gov Internet Filtering Cap','Gov Internet Filtering Practice', 'Gov Internet Shutdown','Gov Social Media Shutdown','Gov Social Media Monitoring','Gov Social Media Censorship','Gov Cyber Security Capacity', 'Gov Capacity to Regulate Content','Gov Content Regulation Approach','Arrests for Political Content','Online Media Consumption','Disinformation')
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/corr.tiff", units="in", width=10, height=8, res=300)
+
+corrplot(M, method="number", title = "Correlation Between V-DEM Disinformation Variables", mar=c(1,1,1,1), tl.col="black",number.digits = 1)
+?corrplot
+dev.off()
+
+```
+
+
+
+```{r Variable Importance, eval=FALSE, include=FALSE}
+
+## Rank Features By Importance ----
+
+# ensure results are repeatable
+set.seed(7)
+
+# prepare training scheme
+?trainControl
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+
+names(getModelInfo())
+
+# train the model using random forest
+model <- train(v2elpeace_ord ~., data=vdem, method="cforest", preProcess="scale", trControl=control)
+
+# estimate variable importance
+importance <- varImp(model, scale=FALSE)
+
+# summarize importance
+print(importance)
+
+
+# Reduce to top 10 features
+
+#plot(importance, top = 10, main="Top 10 Predictor Variables in Random Forest Regression on Electoral Peace")
+
+top10 <- c('v2x_regime','v2smgovcapsec_ord','country_id','v2smpolsoc_ord','v2smarrest_ord','disinfo_median','v2smpolhate_ord','v2smregapp_ord','v2smgovfilprc_ord','v2smgovsm_ord')
+
+# Store varImp as dataframe
+str(varImp(model)$importance)
+
+# convert to df
+imps <- as.data.frame(varImp(model)$importance)
+imps <- imps %>% arrange(desc(Overall))
+imps_top10 <- imps %>% slice(1:10)
+imps_top10 <- imps_top10 %>% arrange(desc(Overall))
+imps_top10_labels <- c('Regime Type','Gov Cyber Security Capacity','Country','Polarization','Arrests for Political Content','Disinformation','Social Media Hate Speech','Gov Content Regulation Approach','Gov Internet Filtering Practice','Gov Social Media Shutdown')
+
+#imps_top10$index <- 1:nrow(imps_top10)
+
+# reshape
+library(tibble)
+
+imps_top10 <- tibble::rownames_to_column(imps_top10)
+
+
+# reshape using spread
+#imps_data_wide = spread(imps_top10, rowname, Overall)
+#imps_data_wide
+
+# rename
+
+library(dplyr)
+library(tidyverse)
+library(magrittr)
+
+#imps_top10 <- imps_top10 %>%
+  #rename(imps_top10,
+         #Regime_Type = v2x_regime,
+         #Gov_Cyber_Security_Capacity = v2smgovcapsec_ord,
+         #Country = country_id,
+         #Polarization=  v2smpolsoc_ord, 
+         #Arrests_Political_Content =  v2smarrest_ord,
+         #Disinformation = disinfo_median,
+         #Social_Media_Hate_Speech = v2smpolhate_ord,
+         #Gov_Content_Regulation_Approach = v2smregapp_ord, 
+         #Gov_Internet_Filtering_Practice = v2smgovfilprc_ord,
+         #Gov_Social_Media_Shutdown = v2smgovsm_ord)
+
+
+str(imps_top10)
+
+imps_top10$rowname <- as_factor(imps_top10$rowname)
+
+imps_top10$rowname <- 
+  recode(imps_top10$rowname,  
+        v2x_regime = "Regime_Type",
+        v2smgovcapsec_ord = "Gov_Cyber_Security_Capacity",
+         country_id = "Country",
+         v2smpolsoc_ord = "Polarization",  
+         v2smarrest_ord ="Arrests_Political_Content",
+         disinfo_median = "Disinformation",
+         v2smpolhate_ord = "Social_Media_Hate_Speech",
+         v2smregapp_ord = "Gov_Content_Regulation_Approach", 
+         v2smgovfilprc_ord = "Gov_Internet_Filtering_Practice",
+         v2smgovsm_ord = "Gov_Social_Media_Shutdown",
+         .default = levels(imps_top10$rowname))
+
+  # create plot
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/predictors10.tiff", units="in", width=10, height=8, res=300)
+  ggplot(data=imps_top10, aes(x=rowname, y=Overall) ) +
+  geom_bar(stat='identity',position="dodge",width = 0, color = "black") + 
+    scale_x_discrete(limits=rev)+
+  coord_flip() + geom_point(color='skyblue') + xlab(" Importance Score")+
+  ggtitle("Variable Importance in Predicting Electoral Violence") + 
+    labs(
+  caption = "Source: V-Dem Institute, 2022")
+
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.text = element_text(size=20) +
+  theme(panel.background = element_rect(fill = 'white', colour = 'black'))
+  
+  
+dev.off()
+
+```
+
+
+
+
+```{r Data Transformation, include=FALSE}
+vdem_num <- vdem[1,6:20]
+
+# create copy of vdem
+vdem2 <- vdem
+
+# Calculate skewness of data
+library(moments)
+library(dlookr)
+library(forecast)
+library(MASS)
+
+library(rcompanion)
+
+find_skewness(vdem_num, value = TRUE) 
+
+?plotNormalHistogram
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/beforehistogram.tiff", units="in", width=10, height=8, res=300)
+
+
+hist_ev <- plotNormalHistogram(vdem2$v2elpeace_ord, main = 'Histogram of Electoral Violence :Pre-transformation')
+
+dev.off()
+
+#######################
+
+vdem2$v2elpeace_ord <- as.numeric(vdem2$v2elpeace_ord)
+str(vdem2$v2elpeace_ord)
+
+# Transform target variable
+vdem2$sqrt_peace <- transform(vdem2$v2elpeace_ord, method = "sqrt")
+
+# summary of transformation
+summary(vdem2$sqrt_peace)
+
+#transformation_web_report(vdem5) 
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/afterhistogram.tiff", units="in", width=10, height=8, res=300)
+
+
+hist_ev <- plotNormalHistogram(vdem2$sqrt_peace, main = 'Histogram of Electoral Violence: Post-transformation')
+
+dev.off()
+
+```
+
+
+PANEL REGRESSION 1
+```{r MODEL1, include=FALSE}
+
+vdem2 <- pdata.frame(vdem2, index = c('country_name', 'year'))
+vdem2 <- na.omit(vdem2)
+
+# Drop county_name and year
+#vdem3 <- vdem2[3:15]
+
+colnames(vdem2)
+formula1 <- sqrt_peace ~ disinfo_median + v2x_regime +  v2smpolhate_ord   +  v2smpolsoc_ord  + v2smonex_ord   
+        
+
+# Pooled Model
+model1_pool <- plm(formula1,data = vdem2,index=c('country_name','year', model = 'pooling',vcov. = vcovHAC))
+
+summary(model1_pool)
+
+# RANDOM EFFECTS
+
+model1_random <- plm(formula1, data = vdem2, index=c('country_name','year'),model = 'random',vcov. = vcovHAC)
+
+
+# Within
+
+model1_within <- plm(formula1,
+                    data = vdem2,
+                    index = c("country_name", "year"), 
+                    model = "within",vcov. = vcovHAC)
+
+
+##BETWEEN ESTIMATOR
+model1_between<-plm(formula1,data=vdem2,model="between", vcov.=vcovHAC)
+summary(model1_between)
+
+#FIRST DIFFERENCES ESTIMATOR
+model1_firstdiff<-plm(formula1,data=vdem2,model="fd")
+summary(model1_firstdiff)
+
+
+# HAUSMAN TEST (if p < 0.05, reject null hypothesis of random effects)
+
+phtest(model1_within, model1_random)
+
+# summary
+
+summary(model1_within)
+
+# Fixed Time 1
+# update formula
+
+formula_1.2 <- update(formula1,    ~ . + factor(year)) 
+
+print(formula_1.2)
+
+# Time Effects 
+fixed.time1 <- plm(formula_1.2, data = vdem2, index = c('country_name','year'), model='within',vcov. = vcovHAC)
+
+summary(fixed.time1)
+
+# Test to determine fixed vs. time.  (if p < 0.05 then use time effects)
+pFtest(fixed.time1,model1_within)
+
+# 
+# Test cross-sectional dependence 
+pcdtest(model1_within, test = c('lm'))
+
+# Test for serial correlation
+
+pbgtest(model1_within)
+
+library(lmtest)
+
+# Test for heteroskedasticity
+
+bptest(model1_within, data= vdem2,studentize=F)
+
+
+
+# Dickey-Fuller to test for stochastic trends.  Null H is that series has a unit root (is non-stationary).  If unit root is present you can take the first difference of the variable. If p < 0.05 then no roots present.
+
+library(tseries)
+
+adf.test(vdem2$sqrt_peace)
+
+```
+
+
+
+
+MEDIATION
+```{r MEDIATION, include=FALSE}
+# Mediation Analysis ---- 
+
+# Indirect effect: Product of Coefficients Approach
+# Sobel Test (Delta Method) 
+# Resampling Methods : Bootstrapping (percentile, bias-corrected)
+
+# Statistical Assumptions: Path Analysis in R tutorial
+
+# Preliminary Steps
+
+# Specify path analysis model
+
+library(lavaan)
+library(stargazer)
+
+# Name variables for model
+M_Polarization <- vdem2$v2smpolsoc_ord
+IV_Disinformation <- vdem2$disinfo_median
+DV_Electoral_Violence <- vdem2$sqrt_peace
+# Test the total (direct) effect:
+
+fit.totaleffect=lm(DV_Electoral_Violence~IV_Disinformation,vdem2,vcov. = vcovHAC)
+
+disinfo_coef <- fit.totaleffect$coefficients[2]
+disinfo_coef
+
+disinfo_coef2 <- disinfo_coef^2
+disinfo_coef2
+
+require(broom)
+tidy(fit.totaleffect)
+
+is.data.frame(tidy(fit.totaleffect))
+
+# Square coefficient
+total_effect <- round(fit.totaleffect$coefficients[2]^2, 3)
+
+# Step 2: The effect of the IV onto the mediator
+fit.mediator=lm(M_Polarization~IV_Disinformation,vdem2,vcov. = vcovHAC)
+summary(fit.mediator)
+
+# Square coefficient
+fit.mediator_coef<- round(fit.mediator$coefficients[2]^2, 3)
+fit.mediator_coef  
+
+# Step 3: The effect of the mediator on the dependent variable
+
+fit.dv =lm(DV_Electoral_Violence~IV_Disinformation+M_Polarization,vdem2,vcov. = vcovHAC)
+summary(fit.dv)
+
+# Square coefficient
+fit.dv_coef_IV_Disinfo <- round(fit.dv$coefficients[2]^2,3)
+fit.dv_coef_IV_Disinfo
+
+fit.dv_coef_M_Polar <- round(fit.dv$coefficients[3]^2,3)
+fit.dv_coef_M_Polar
+
+
+# Step #4: Causal Mediation Analysis
+library(mediation)
+medresults = mediate(fit.mediator, fit.dv, treat='IV_Disinformation', mediator='M_Polarization', boot=T)
+
+med_results <- (summary(medresults))
+med_results
+
+stargazer(medresults, summary=TRUE, type='html', rownames=FALSE, initial.zero=FALSE, digits=3, title='Predicting Y')
+
+m1.fit <- sem(m1.syntax, std.lv=TRUE, data=data)
+
+
+
+
+```
+
+
+```{r Mediation 3, echo=FALSE}
+
+medmod1<- "# a path
+         v2smpolsoc_ord ~ a * disinfo_median
+
+         # b path
+         sqrt_peace ~ b * v2smpolsoc_ord
+
+         # c prime path 
+         sqrt_peace ~ cp * disinfo_median
+
+         # indirect and total effects
+         ab := a * b
+         total := cp + ab"
+
+set.seed(1234)
+
+fsem1 <- sem(medmod1, data = vdem2, se = "bootstrap", bootstrap = 5000)
+
+# summarize model
+summary(fsem1, standardized = TRUE)
+
+medmod1.fit <- sem(medmod1, std.lv=TRUE, data = vdem2)
+
+pars.factors <- standardizedSolution(medmod1.fit)
+pars.regressions <- standardizedSolution(medmod1.fit)
+
+stargazer(pars.regressions, summary=TRUE, type='html', rownames=FALSE, initial.zero=FALSE, digits=3, title='Path Coefficients Table - V-Dem Disinformation Data',
+          out = "Images/mediation2.html")
+
+# square coefficients
+coefA <- round(0.348^2, 3)
+coefB <- round(0.161^2, 3)
+coefC <- round(0.225^2, 3)
+coefAB <- round(0.0559389^2, 3)
+coefABCI1 <- round(0.0429595^2, 3)
+coefABCI2 <- round(0.0715581^2, 3)
+
+# Print model parameters
+estimates <- parameterestimates(fsem1, boot.ci.type = "bca.simple", standardized = TRUE) %>% 
+  kable() 
+  
+estimates
+
+# Plot mediation effect
+library(psych)
+library(MBESS)
+
+# Plot
+with(vdem2, mediation.effect.plot(x = disinfo_median, mediator = v2smpolsoc_ord, dv = sqrt_peace, ylab = "Electoral Violence", xlab = "Political Polarization (4 = Highly Polarized)"))
+
+round(0.2252^2,3)  
+round(0.0559^2,3)
+# total
+round(0.2811^2,3)     
+```
+Research Question 2: Policy outcomes with disinformation as DV
+
+```{r OUTLIERS}
+library(rstatix)
+vdem3 <- vdem2
+## Assumptions ----
+### Check sample size assumption ----
+vdem3 %>%
+  group_by(country_name, year) %>%
+  summarise(N = n())
+
+
+### Identify univariate outliers ----
+
+# Group the data by country_name and then, identify outliers in the sqrt_peace variable:
+
+str(vdem_df2$disinfo_median)
+  
+identify_outliers(vdem_df2, variable=disinfo_median)
+
+```
+
+
+```{r Outliers, echo=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(car)
+library(broom)
+
+
+# the Mahalanobis distance is generally used to detect multivariate outliers. The distance tells us how far an observation is from the center of the cloud, taking into account the shape (covariance) of the cloud as well.
+
+# The function mahalanobis_distance() [rstatix package] can be easily used to compute the Mahalanobis distance and to flag multivariate outliers. Read more in the documentation of the function.
+
+# Compute distance by groups and filter outliers
+# Use -id to omit the id column in the computation
+
+vdem2$year <- as.numeric(as.character(vdem2$year))
+
+outliers<- vdem2 %>%
+  select(-country_name,-country_id,-country_text_id)
+
+#create new column in data frame to hold Mahalanobis distances
+outliers$mahal <- mahalanobis(outliers, colMeans(outliers), cov(outliers))
+
+#create new column in data frame to hold p-value for each Mahalanobis distance
+outliers$p <- pchisq(outliers$mahal, df=2, lower.tail=FALSE)
+
+# In general, a p-value that is less than 0.001 is considered to be an outlier.
+outliers %>% filter (p<0.001)
+# There were no multivariate outliers in the data, as assessed by Mahalanobis distance (p > 0.001).
+
+# If you have multivariate outliers, you could consider running MANOVA before and after removing the outlier to check whether or not their presence alter the results. You should report your final decision.
+
+
+```
+
+
+
+```{r Interpretation of Coefficients, include=FALSE}
+# 1 Set the independent variable for the coefficient of interest to a low value
+
+predict_disinfo <- quantile(vdem2$disinfo_median, .25)
+print(predict_disinfo)
+
+predict_disinfo <- as.data.frame(predict_disinfo)
+
+print(formula1)
+
+# 2. Set the other independent variables (control variables) to reasonable values (e.g. their means).  
+
+vdem3 <- vdem2
+
+vdem3 <- dplyr::select (vdem3,-c(country_name,year, disinfo_median))
+
+# Create empty new table with vdem as frame
+
+new <- vdem3 %>% slice(-c(1:1040))
+
+iv_means <- as.data.frame(apply(vdem3, 2, mean))
+
+# Reshape to wide format
+iv_means <- t(iv_means)
+
+iv_means <- as.data.frame(iv_means)
+
+# Add predict_disinfo to new iv_means dataframe
+
+# # merge iv_means and predict_disinfo
+# iv_means[nrow(iv_means) + 1,] =  1
+
+iv_means$disinfo_median <-predict_disinfo$predict_disinfo
+
+# Drop  v2elpeace and duplicate column
+iv_means<- iv_means %>% dplyr::select (-c(sqrt_peace, v2elpeace_ord))
+
+# Merge dataframes
+appended <- rbind(iv_means, new)
+
+# 3. Then calculate the predicted value of the dependent variable.
+library(plm)
+
+appended$year <- 2000
+appended$country_name <- 'sample'
+
+appended <- pdata.frame(appended, index = c("year", "country_name") )
+
+appended <- appended %>% dplyr:: select(-c('country_name','year'))
+
+
+# 3. Then calculate the predicted value of the dependent variable.
+print(formula1)
+
+predict1 <- predict(model1_within,newdata=appended)
+
+plm:::predict.plm(model1_within, newdata=appended)
+
+
+#4. Next, increase the value of the independent variable of interest  to, say, the 75th percentile but don’t change the values of the controls.  Now calculate the predicted value of the dependent variable. 
+
+predict_disinfo2 <- quantile(vdem2$disinfo_median, .75)
+
+predict_disinfo2 <- as.data.frame(predict_disinfo2)
+
+appended2 <- appended
+# insert new value of disinfo_median at .75 percentile
+appended2$disinfo_median <- 2
+
+
+predict2 <- predict(model1_within,newdata=appended2)
+
+# 5. The difference in the value of the outcome variable between these two calculations is the estimated effect of increasing the independent variable of interest from the 25th to the 75th percentile while holding the controls constant. 
+
+predict_diff <- predict2-predict1
+
+
+```
+
+MODEL 2 - Disinformation as Dependent Variable
+```{r MODEL 2-Disinformation, echo=FALSE}
+disinfo_formula <- disinfo_median ~ v2x_regime +  v2smpolhate_ord   +  v2smpolsoc_ord  +   
+v2smgovfilcap_ord  + v2smgovfilprc_ord  + v2smgovshut_ord   +  v2smgovsm_ord +     
+v2smgovsmmon_ord  +  v2smgovsmcenprc_ord + v2smgovcapsec_ord +  v2smregcap_ord  +   
+v2smregapp_ord   +   v2smarrest_ord    +  v2smonex_ord  
+
+
+# Pooled Model
+disinfo_pool <- plm(disinfo_formula,data = vdem2,index=c('country_name','year', model = 'pooling',vcov. = vcovHAC))
+
+# print summary using robust standard errors
+
+summary(disinfo_pool)
+
+# RANDOM EFFECTS
+
+disinfo_random <- plm(disinfo_formula, data = vdem2, index=c('country_name','year'),model = 'random',vcov. = vcovHAC)
+
+
+# Within
+
+disinfo_within <- plm(disinfo_formula,
+                    data = vdem2,
+                    index = c("country_name", "year"), 
+                    model = "within",vcov. = vcovHAC)
+
+##BETWEEN ESTIMATOR
+disinfo_between<-plm(disinfo_formula,data=vdem2,model="between", vcov.=vcovHAC)
+summary(disinfo_between)
+
+#FIRST DIFFERENCES ESTIMATOR
+disinfo_firstdiff<-plm(disinfo_formula,data=vdem2,model="fd")
+summary(disinfo_firstdiff)
+
+
+# HAUSMAN TEST (if p < 0.05, reject null hypothesis of random effects)
+
+phtest(disinfo_within, disinfo_random)
+
+# print summary using robust standard errors
+
+summary(disinfo_within)
+
+
+# Fixed Time 1
+# update formula
+
+disinfo_1.2 <- update(disinfo_formula,    ~ . + factor(year)) 
+
+print(disinfo_1.2)
+
+
+disinfo.time1 <- plm(disinfo_1.2, data = vdem2, index = c('country_name','year'), model='within',vcov. = vcovHAC)
+
+
+summary(disinfo.time1)
+
+# Test to determine fixed vs. time.  (if p < 0.05 then use time effects)
+pFtest(disinfo.time1,disinfo_within)
+
+# Test for serial correlation
+
+pbgtest(disinfo_within)
+
+library(lmtest)
+
+# Test for heteroskedasticity
+
+bptest(disinfo_within, data= vdem2, studentize = F)
+
+
+# Dickey-Fuller to test for stochastic trends.  Null H is that series has a unit root (is non-stationary).  If unit root is present you can take the first difference of the variable. If p < 0.05 then no roots present.
+
+library(tseries)
+
+
+adf.test(vdem2$disinfo_median)
+
+```
+
+
+```{r Map, echo=FALSE}
+
+library(highcharter)
+library(dplyr)
+library(maps)
+library(plotly)
+
+vdem_map <- vdem_map[-1]
+
+vdem_map_2000 <- vdem_map %>% filter(year == 2000)
+
+# set margins
+m <- list(
+  l = 10,
+  r = 10,
+  b = 10,
+  t = 25,
+  pad = 2
+)
+
+# light grey boundaries
+
+l <- list(color = toRGB("grey"), width = 0.5)
+
+# specify map projection/options
+
+g <- list(
+
+  showframe = TRUE,
+  showcoastlines = TRUE,
+  projection = list(type = 'Mercator')
+
+)
+
+disinfo_map_2000 <- plot_geo(vdem_map_2000)
+
+disinfo_map_2000 <- disinfo_map_2000 %>% add_trace(
+    z = ~disinfo_median, color = ~disinfo_median, colors = 'Blues',
+    text = ~country_name, locations = ~country_text_id, marker = list(line = l)
+  )
+
+disinfo_map_2000 <- disinfo_map_2000 %>% colorbar(title = 'Disinformation', y=0.78)
+
+disinfo_map_2000 <- disinfo_map_2000 %>% layout(
+    title = 'Global Disinformation in 2000<br>Source:V-Dem Institute',
+    geo = g
+
+  )
+
+disinfo_map_2000 <- disinfo_map_2000 %>% layout(autosize = F, width = 600, height = 600, margin = m)
+
+disinfo_map_2000
+
+
+```
+
+# Map 2020 ##########################################################################
+```{r Map2020, echo=FALSE}
+
+# average disinfo values for each country in all years
+vdem_map_2020 <- vdem_map %>% filter(year == 2020)
+
+disinfo_map_2020 <- plot_geo(vdem_map_2020)
+disinfo_map_2020 <- disinfo_map_2020 %>% add_trace(
+    z = ~disinfo_median, color = ~disinfo_median, colors = 'Blues',
+    text = ~country_name, locations = ~country_text_id, marker = list(line = l)
+  )
+
+disinfo_map_2020 <- disinfo_map_2020 %>% colorbar(title = 'Disinformation', y=0.78)
+?colorbar
+disinfo_map_2020 <- disinfo_map_2020 %>% layout(
+    title = 'Global Disinformation in 2020<br>Source:V-Dem Institute',
+    geo = g
+
+  )
+
+disinfo_map_2020 <- disinfo_map_2020 %>% layout(autosize = F, width = 600, height = 600, margin = m)
+
+disinfo_map_2020
+
+
+
+```
+
+
+```{r Data Visualization, echo=FALSE}
+
+# Libraries
+library(tidyverse)
+library(hrbrthemes)
+library(viridis)
+library(forcats)
+
+library(ggplot2)
+library(GGally)
+library(tidyverse)
+
+library(ggmosaic)
+library(viridis)
+library(ggalluvial)
+
+
+##################################################################################
+# Copy vdem2
+
+vdem_factors <- vdem %>%  as_factor()
+
+my_table <- vdem_factors %>% 
+  group_by(v2elpeace_ord, disinfo_median) %>% 
+  tally() %>% 
+  spread(key = disinfo_median, value = n)
+print.data.frame(my_table)
+
+EV_freq <- vdem_factors %>%
+  dplyr::count(disinfo_median, v2elpeace_ord) %>%
+  mutate(proptot = prop.table(n))
+head(EV_freq)
+
+EV_freq$v2elpeace_ord <- as_factor(EV_freq$v2elpeace_ord)
+EV_freq$disinfo_median <- as_factor(EV_freq$disinfo_median)
+
+
+```
+
+
+```{r Alluvial, echo=FALSE}
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/alluvial.tiff", units="in", width=6, height=6, res=300)
+# Create Alluvial to show flow of Disinformation into Electoral Violence
+ggplot(as.data.frame(EV_freq),
+       aes(y = proptot, axis1 = disinfo_median, 
+           axis2 = v2elpeace_ord)) +
+  geom_alluvium(aes(fill = disinfo_median), 
+                width = 1/12, alpha=0.5) +
+  geom_stratum(width = 1/12, 
+               fill = "black", 
+               colour = "grey") +
+  geom_label(stat = "stratum",
+             infer.label = TRUE) +
+  scale_x_discrete(limits = c("Disinformation", "Electoral Violence"),
+                   expand = c(.05, .05),
+                   labels = c("Disinformation\nQuintile", "Electoral Violence")) +
+  ggtitle("Flow of Electoral Violence from Disinformation Quintile") +
+  scale_fill_manual(values=c("#0FC5D9", "#0B8A9E", "#5BC27A", "#0004FF","#FF0D00"), 
+                    name="Disinformation Quintile",
+                    breaks=c("0","1", "2", "3", "4"),
+                    labels=c("0 - Least Disinformation", "1 - Low Disinformation","2 - Moderate Disinformation", "3 - Moderatly High Disinformation", "4 - Most Disinformation")) +
+  theme_minimal() +
+  theme(legend.position = "right",
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) +
+  labs(y = "Proportion of Total",
+       caption = "Source: V-Dem Institute")
+
+dev.off()
+
+
+```
+
+
+
+```{r Time Series, echo=FALSE}
+
+library(ggplot2)
+library(reshape2)
+library(viridis)
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/ts1.tiff", units="in", width=6, height=6, res=300)
+ 
+group_by_year_sum <-vdem_factors %>% 
+  group_by(year, disinfo_median) %>%
+  summarise(count = n())
+
+# Stacked Disinformation by Year
+ggplot(group_by_year_sum, aes(fill=disinfo_median, y=count, x=year)) + 
+    geom_bar(position="stack", stat="identity") + scale_fill_viridis() +
+    ggtitle("Sum of Disinformation Ratings per Country per Year") +
+    labs(fill = "Disinformation Rating", caption = "Source: V-Dem Institute")
+ 
+dev.off()
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/ts2.tiff", units="in", width=6, height=6, res=300)
+
+# Group by year-Electoral Violence
+group_by_year_sum2 <-vdem_factors %>% 
+  group_by(year, v2elpeace_ord) %>%
+  summarise(count = n())
+
+
+# Stacked Electoral Violence by Year
+ggplot(group_by_year_sum2, aes(fill=v2elpeace_ord, y=count, x=year)) + 
+    geom_bar(position="stack", stat="identity") + scale_fill_viridis() +
+    ggtitle("Sum of Electoral Violence Ratings Groups per Year") +
+    labs(fill = "Electoral Violence Rating", caption = "Source: V-Dem Institute")
+  
+
+dev.off()
+  
+
+
+```
+
+
+```{r EXPLORATORY DATA ANALYSIS, eval=FALSE, include=FALSE}
+# EXPLORATORY DATA ANALYSIS ----
+
+## ExPanD Visualizations ----
+ExPanD(vdem_df2)
+
+ExPanD(
+  df = vdem_df2,
+  cs_id = "country_name",
+  ts_id = "year",
+  df_def = NULL,
+  var_def = NULL,
+  config_list = ExPanD_config_worldbank,
+  title = "Measuring the Impacts of Disinformation and Policies on Electoral Violence",
+  abstract = NULL,
+  df_name = deparse(substitute(df)),
+  long_def = TRUE,
+  factor_cutoff = 10L,
+  components = c(sample_selection = TRUE, subset_factor = TRUE, grouping = TRUE,
+                 bar_chart = TRUE, missing_values = TRUE, udvars = TRUE, descriptive_table = TRUE,
+                 histogram = TRUE, ext_obs = TRUE, by_group_bar_graph = TRUE, by_group_violin_graph =
+                   TRUE, trend_graph = TRUE, quantile_trend_graph = TRUE, by_group_trend_graph = TRUE,
+                 corrplot = TRUE, scatter_plot = TRUE, regression = TRUE),
+  html_blocks = NULL,
+  export_nb_option = FALSE,
+  store_encrypted = FALSE,
+  key_phrase = "What a wonderful key",
+  debug = FALSE,
+)
+
+prepare_missing_values_graph(vdem, ts_id= "year")
+
+
+```
+
+```{r Rates of Change, echo=FALSE}
+# NOTE: includes all data, not just filtered via electoral violence
+
+disinfo_rate <- vdem_df2 %>% select(-v2elpeace_ord)
+  str(vdem_df2)
+  
+  # add blank variables
+  disinfo_rate$Diff_year <- NA
+  disinfo_rate$Diff_growth <- NA
+  disinfo_rate$Rate_percent <- NA
+  
+
+  # first sort by year
+  disinfo_rate <- disinfo_rate %>%
+    arrange(disinfo_rate$year) %>%
+  mutate(Diff_year = year - lag(disinfo_rate$year),  # Difference in time (just in case there are gaps)
+         Diff_growth = disinfo_median - lag(disinfo_median), # Difference in variable between years
+         Rate_percent = (Diff_growth / Diff_year)/disinfo_median * 100) # growth rate in percent
+
+  Average_Disinfo_Growth <- mean(disinfo_rate$Rate_percent, na.rm = TRUE)
+  
+  
+  
+  
+  # RATES OF CHANGE 2
+  
+  # Disinformation
+
+group_by_year_sum$rate <- NA
+
+group_by_year_sum <- group_by_year_sum  %>% 
+  group_by(disinfo_median) %>% 
+  arrange(group_by_year_sum, year) %>% 
+  mutate(rate = 100 * (count - lag(count, default = NA))/lag(count, default = NA))
+  ungroup()
+
+group_by_year_sum$previous_year_value <-   mutate(group_by_year_sum,lag(count, order_by = year))
+group_by_year_sum$countsublag <- group_by_year_sum$count-lag(group_by_year_sum$count)
+
+  
+ # Rates of change 3
+
+df <- data.frame(ID = c("1A", "1A", "1A", "1B", "1B", "1B"),
+                 Year = c(1994, 1995, 1997, 2000, 2012, 2013),
+                 Mean = c(1, 2, 4, 3, 4, 5),
+                 stringsAsFactors = FALSE)
+
+delta <- function(x) diff(c(NA, x))      # inserts an NA value at the beginning
+prior <- function(x) c(NA, head(x, -1))  # lagging function using base R    
+rate  <- function(x) delta(x) / prior(x) # for readability
+
+df$growth_rate <- ifelse(df$ID == prior(df$ID), rate(df$Mean), NA)
+  
+df 
+
+library(zoo)
+
+# Rates of Change 4: Disinformation only
+
+ROC <- vdem_factors %>% select(disinfo_median,year) %>% 
+  group_by(year, disinfo_median) %>%
+  summarise(count = n())
+  
+ROC$level <- ROC$disinfo_median
+# # Gather and calculate percent change
+library(dplyr)
+
+  
+#############################################################3
+
+x <- zoo(ROC2$value)
+year <- zoo(ROC2$year)
+
+zoolag <- cbind(x,year)
+zoolag <- as_data_frame(zoolag)
+
+zoolag$x <- zoolag$value
+
+zoolag <- zoolag %>% mutate(group = case_when(
+                         zoolag$x==0  ~ "A",
+                         zoolag$x==1 ~ "B", 
+                         zoolag$x==2 ~ "C",
+                         zoolag$x==3 ~ "D",
+                         zoolag$x==4 ~"E"))
+
+zoolagA <- zoolag %>% filter (group == "A")
+zoolagB <- zoolag %>% filter (group == "B")
+zoolagC <- zoolag %>% filter (group == "C")
+zoolagD <- zoolag %>% filter (group == "D")
+zoolagE <- zoolag %>% filter (group == "E")
+
+# calculate RoC per group:
+
+zoolagA <- zoolagA %>% 
+  arrange(year) %>%
+  mutate(Diff_year = year - lag(year),  # Difference in time (just in case there are gaps)
+         Diff_growth = x - lag(x), # Difference in x between years
+         Rate_percent = (Diff_growth / Diff_year)/x * 100) 
+
+Average_growthA = mean(zoolagA$Rate_percent, na.rm = TRUE)
+
+
+zoolagB <- zoolagB %>% 
+  arrange(year) %>%
+  mutate(Diff_year = year - lag(year),  # Difference in time (just in case there are gaps)
+         Diff_growth = x - lag(x), # Difference in x between years
+         Rate_percent = (Diff_growth / Diff_year)/x * 100) 
+
+Average_growthB = mean(zoolagB$Rate_percent, na.rm = TRUE)
+
+zoolagC <- zoolagC %>% 
+  arrange(year) %>%
+  mutate(Diff_year = year - lag(year),  # Difference in time (just in case there are gaps)
+         Diff_growth = x - lag(x), # Difference in x between years
+         Rate_percent = (Diff_growth / Diff_year)/x * 100) 
+
+Average_growthC = mean(zoolagC$Rate_percent, na.rm = TRUE)
+
+
+x <- zoo(ROC2$value)
+y <- lag(x, -1, na.pad = TRUE)
+zoolag <- as_data_frame(cbind(x, y))
+
+  
+```
+
+```{r Count of sample size, echo=FALSE}
+group_by_year_ss <- vdem2  %>% 
+  group_by(year) %>% 
+  summarise(count=n())
+
+group_by_year_sum <-vdem_factors %>% 
+  group_by(year, disinfo_median) %>%
+  summarise(count = n())
+```
+
+```{r RANDOM FOREST Q2, echo=FALSE}
+library(ggplot2)
+library(cowplot)
+library(randomForest)
+library(tidyverse)
+
+# select entire dataset, drop v2elpeace so all data is present and panel is balanced.
+vdem_factors2 <- vdem_df2%>% select(-country_text_id,-country_id,-v2elpeace_ord) 
+
+collist <- colnames(vdem_factors2)
+vdem_factors2 <- lapply(vdem_factors2[collist],factor)
+   
+str(vdem_factors2)
+
+set.seed(42)
+
+RFModel<- randomForest(disinfo_formula, data= vdem_factors2, proximity=TRUE, importance=TRUE)
+
+RFModel
+
+# Plot the error rates
+oob.error.data <- data.frame(
+  Trees=rep(1:nrow(RFModel$err.rate),times=3),
+  Type=rep(c("OOB","0","1","2","3","4"), each=nrow(RFModel$err.rate)),
+  Error=c(RFModel$err.rate[,"OOB"],
+           RFModel$err.rate[,"0"],
+           RFModel$err.rate[,"1"],
+           RFModel$err.rate[,"2"],
+           RFModel$err.rate[,"3"],
+           RFModel$err.rate[,"4"]))
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/RFError.tiff", units="in", width=10, height=8, res=300)
+
+ggplot(data=oob.error.data,aes(x=Trees,y=Error)) +
+  geom_line(aes(color=Type))+
+  ggtitle('Random Forest Error Rates for Predicting Disinformation Outcomes')
+
+dev.off()
+
+
+# RF adjustment
+RFModel2<- randomForest(disinfo_formula, data= vdem_factors2, ntree=2000,proximity=TRUE, localImp=TRUE)
+
+RFModel2
+
+# determine optimal number of variables to split
+oob.values <- vector(length=10)
+for (i in 1:10){
+  temp.model <- randomForest(disinfo_formula, data=vdem_factors2,mytry=i,ntree=2000)
+  oob.values[i] <- temp.model$err.rate[nrow(temp.model$err.rate),1]
+}
+
+# Best split is 3 (default)
+temp.model
+oob.values
+
+
+# MDS Plot
+
+distance.matrix <- dist(1-RFModel2$proximity)
+
+# classical multidimensional scaling
+mds.stuff <- cmdscale(distance.matrix, eig = TRUE, x.ret=TRUE)
+
+# calculate the percentage of variation in the distance matrix that the X and Y axes account for
+mds.var.per <- round(mds.stuff$eig/sum(mds.stuff$eig)*100,1)
+
+# mds values
+mds.values <- mds.stuff$points
+mds.data <- data.frame(Sample=rownames(mds.values),
+                       X=mds.values[,1],
+                       Y=mds.values[,2],
+                       Status=vdem_factors2$disinfo_median)
+
+# plot
+ggplot(data=mds.data, aes(x=X, y=Y, label=Sample)) +
+  geom_text(aes(color=Status)) +
+  theme_bw()+
+  xlab(paste('MDS1 - ', mds.var.per[1], '%', sep=''))+
+  ylab(paste('MDS2 - ',mds.var.per[2],'%', sep=''))+
+  ggtitle('MDS plot using (1- Random Forest Proximities)')
+
+# Variable importance graphs
+
+library(randomForestExplainer)
+?randomForest
+
+explain_forest(RFModel2, data = vdem_factors2)
+```
+
+
+# Stacked Area charts
+```{r Stacked Area Charts, echo=FALSE}
+library(ggpubr)
+library(tidyverse)
+library(gcookbook)
+library(forcats)
+
+
+# create new df
+area_df <- vdem_df2 %>% select(-v2elpeace_ord, -country_name,-country_text_id, -country_id) %>% group_by(year)
+
+
+# rename levels of disinfo_median
+area_df$disinfo_median <- as.factor(area_df$disinfo_median)
+
+levels(area_df$disinfo_median)<- c('Very Low Disinformation', 'Low Disinformation', 'Moderate Disinformation', 'Moderately High Disinformation', "Very High Disinformation")
+
+
+
+################################################################################################################################
+# Regime type ----
+
+area_df_regime <- area_df %>% select(year,v2x_regime,disinfo_median) %>%
+  group_by(year, disinfo_median,v2x_regime) %>%
+  summarise(N=n())
+  
+str(area_df_regime)
+
+
+
+# change regime type to factor
+area_df_regime$v2x_regime <- as.factor(area_df_regime$v2x_regime)
+
+# rename levels of regime type
+levels(area_df_regime$v2x_regime) <- c('Closed Autocracy','Electoral Autocracy','Electoral Democracy','Liberal Democracy')
+
+# save file
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/area_regime.tiff", units="in", width=10, height=8, res=300)
+
+area_regime <- ggplot(area_df_regime, aes(x = year,
+                     y = N, 
+                     fill = disinfo_median)) +
+  geom_area(position="fill", colour = "black", size = .2, alpha = .4) +
+  scale_fill_brewer(palette='Blues') +
+  scale_y_continuous(labels=scales::percent)+
+  labs(title = "Disinformation by Regime Type",
+       x = "Year",
+       y = "Percent of Countries",
+       fill='Disinformation Level',
+       caption = "Source: V-Dem Institute, 2022") 
+
+area_regime + facet_grid(area_df_regime$v2x_regime)
+
+
+dev.off()
+
+
+
+#########################################################################################################
+# Gov Internet Filtering Practice ----
+
+# Create df
+area_df_govfilprc <- area_df %>% select(year,v2smgovfilprc_ord,disinfo_median) %>%
+  group_by(year, disinfo_median,v2smgovfilprc_ord) %>%
+  summarise(N=n())
+  
+str(area_df_govfilprc)
+
+# change govfilprc to factor
+area_df_govfilprc$v2smgovfilprc_ord <- as.factor(area_df_govfilprc$v2smgovfilprc_ord)
+
+# rename levels of govfilprc
+levels(area_df_govfilprc$v2smgovfilprc_ord) <- c('Extremely Often','Often','Sometimes','Rarely','Almost Never')
+
+# save file
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/area_govfilprc.tiff", units="in", width=10, height=8, res=300)
+
+area_govfilprc <- ggplot(area_df_govfilprc, aes(x = year,
+                     y = N, 
+                     fill = disinfo_median)) +
+  geom_area(position="fill", colour = "black", size = .2, alpha = .4) +
+  scale_fill_brewer(palette='Blues') +
+  scale_y_continuous(labels=scales::percent)+
+  labs(title = "Disinformation by Internet Filtering Practice",
+       x = "Year",
+       y = "Percent of Countries",
+       fill='Disinformation Level',
+       caption = "Source: V-Dem Institute, 2022") 
+
+area_govfilprc + facet_grid(area_df_govfilprc$v2smgovfilprc_ord)
+
+
+dev.off()
+
+
+#################################################################################################################
+# Gov Social Media Monitoring----
+
+# Create df
+area_df_govsmmon <- area_df %>% select(year,v2smgovsmmon_ord,disinfo_median) %>%
+  group_by(year, disinfo_median,v2smgovsmmon_ord) %>%
+  summarise(N=n())
+  
+str(area_df_govsmmon)
+
+# change govsmmon to factor
+area_df_govsmmon$v2smgovsmmon_ord <- as.factor(area_df_govsmmon$v2smgovsmmon_ord)
+
+# rename levels of Gov Social Media Monitoring
+levels(area_df_govsmmon$v2smgovsmmon_ord) <- c('Extremely Comprehensive','Mostly Comprehensive','Somewhat Comprehensive','Limited','Not At All')
+
+# save file
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/area_govsmmon.tiff", units="in", width=10, height=10, res=300)
+
+area_govsmmon <- ggplot(area_df_govsmmon, aes(x = year,
+                     y = N, 
+                     fill = disinfo_median)) +
+  geom_area(position="fill", colour = "black", size = .2, alpha = .4) +
+  scale_fill_brewer(palette='Blues') +
+  scale_y_continuous(labels=scales::percent)+
+  labs(title = "Disinformation by Government Social Media Monitoring Practice",
+       x = "Year",
+       y = "Percent of Countries",
+       fill='Disinformation Level',
+       caption = "Source: V-Dem Institute, 2022") 
+
+area_govsmmon + facet_grid(area_df_govsmmon$v2smgovsmmon_ord)
+
+
+dev.off()
+
+
+###########################################################################################################
+# Gov Internet Shutdown ----
+
+# Create df
+area_df_smgovshut <- area_df %>% select(year,v2smgovshut_ord,disinfo_median) %>%
+  group_by(year, disinfo_median,v2smgovshut_ord) %>%
+  summarise(N=n())
+  
+str(area_df_smgovshut)
+
+# change govshut to factor
+area_df_smgovshut$v2smgovshut_ord <- as.factor(area_df_smgovshut$v2smgovshut_ord)
+
+# rename levels of Gov internet Shutdown
+levels(area_df_smgovshut$v2smgovshut_ord) <- c('Extremely Often','Often','Several Times per Year','Rarely','Never or Almost Never')
+
+# save file
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/area_govshutdown.tiff", units="in", width=10, height=10, res=300)
+
+area_smgovshut <- ggplot(area_df_smgovshut, aes(x = year,
+                     y = N, 
+                     fill = disinfo_median)) +
+  geom_area(position="fill", colour = "black", size = .2, alpha = .4) +
+  scale_fill_brewer(palette='Blues') +
+  scale_y_continuous(labels=scales::percent)+
+  labs(title = "Disinformation by Government Internet Shutdown in Practice",
+       x = "Year",
+       y = "Percent of Countries",
+       fill='Disinformation Level',
+       caption = "Source: V-Dem Institute, 2022") 
+
+area_smgovshut + facet_grid(area_df_smgovshut$v2smgovshut_ord)
+
+
+dev.off()
+
+
+###########################################################################################################
+# Arrests for Political Content ----
+
+# Create df
+area_df_arrest <- area_df %>% select(year,v2smarrest_ord,disinfo_median) %>%
+  group_by(year, disinfo_median,v2smarrest_ord) %>%
+  summarise(N=n())
+  
+str(area_df_arrest)
+
+# change arrest to factor
+area_df_arrest$v2smarrest_ord <- as.factor(area_df_arrest$v2smarrest_ord)
+
+# Rename Levels for Arrests for Political Content
+levels(area_df_arrest$v2smarrest_ord) <- c('Extremely Likely','Likely', 'Extremely Unlikely',
+                                    'Never or Rarely')
+
+# save file
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/area_arrests.tiff", units="in", width=10, height=10, res=300)
+
+area_arrest <- ggplot(area_df_arrest, aes(x = year,
+                     y = N, 
+                     fill = disinfo_median)) +
+  geom_area(position="fill", colour = "black", size = .2, alpha = .4) +
+  scale_fill_brewer(palette='Blues') +
+  scale_y_continuous(labels=scales::percent)+
+  labs(title = "Disinformation by Arrests for Political Content",
+       x = "Year",
+       y = "Percent of Countries",
+       fill='Disinformation Level',
+       caption = "Source: V-Dem Institute, 2022") 
+
+area_arrest + facet_grid(area_df_arrest$v2smarrest_ord)
+
+
+dev.off()
+
+
+
+###########################################################################################################
+
+
+```
+
+```{r Boxplot, echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+
+boxplot_df <- area_df 
+boxplot_df <- as.data.frame(boxplot_df)
+
+boxplot_df2 <- boxplot_df %>% dplyr::select(year,disinfo_median) %>%
+  dplyr:: group_by(year, disinfo_median) %>%
+  dplyr::summarise(N=n())
+
+
+library(data.table)
+library(magrittr) 
+library(ggplot2)
+
+DT <- data.table(vdem_df2)
+
+# DT_long <- DT %>% melt(id.vars = "year")
+
+# library
+library(ggplot2)
+ 
+# create a data frame
+year <- as.factor(vdem_df2$year)
+regime <- as.factor(vdem_df2$v2x_regime)
+disinformation <- vdem_df2$disinfo_median
+country <- as.character(vdem_df2$country_name)
+
+boxdata=data.frame(year, regime ,disinformation,country)
+ 
+# grouped boxplot
+ggplot(data, aes(x=variety, y=note)) + 
+    geom_boxplot()
+
+
+# plotly
+
+library(plotly)
+fig <- plot_ly(boxdata, y = ~ disinformation, color = ~year, type = "box",colors= c("red", "blue", "black"), mode='text',text= ~country,textposition = 'middle right')
+
+
+
+fig
+```
+
+
+
+
+
+
+
+
+What factors are related to different statuses on disinformation status?
+```{r Factor Analysis-Disinformation, echo=FALSE}
+# How many countries have which kind of disinfo status?
+
+area_df
+str(area_df)
+area_df <- lapply(area_df,as_factor)
+
+# for all 20 years
+dis_groups <- table(area_df$disinfo_median)
+dis_groups
+
+# prop.table
+disprop <- prop.table(dis_groups)
+
+barplot(disprop)
+
+
+```
+
+```{r Scatterplot, echo=FALSE}
+
+library(ggplot2)
+# Basic scatter plot
+vdem2df <- as.data.frame(vdem2)
+
+tiff(file="/Users/vanessa/Library/Mobile Documents/com~apple~CloudDocs/GRAD SCHOOL - iCLOUD/SPRING 2022/CAPSTONE_REV/FINAL CAPSTONE/Images/scat.tiff", units="in", width=10, height=8, res=300)
+ggplot(vdem2df, aes(x=disinfo_median, y=sqrt_peace)) + geom_point() + geom_jitter(width = 0.3, height = 0.3) + geom_smooth(method=lm)+
+  labs(title='Relationship Between Disinformation and Electoral Violence',
+       x = "Disinformation",
+       y = "Electoral Violence",
+       caption = "Source: V-Dem Institute, 2022") 
+
+dev.off()
+```
+
+
+```{r Stargazer, echo=FALSE}
+# summary statistics
+stargazer(vdem2, 
+          type = "html",min.max=TRUE, mean.sd = TRUE, 
+          nobs = FALSE, median = TRUE, iqr = TRUE,
+          digits=1, align=T,
+          title = "Summary Statistics - V-Dem Disinformation Data",
+          out = "Images/summary.html")
+
+
+
+# change model names
+
+mod1p <- model1_pool
+mod1r <- model1_random
+mod1w <- model1_within
+mod1t <- fixed.time1
+mod1b <- model1_between
+mod1f <- model1_firstdiff
+
+mod2p <- disinfo_pool
+mod2r <- disinfo_random
+mod2w <- disinfo_within
+mod2t <- disinfo.time1
+mod2b <- disinfo_between
+mod2f <- disinfo_firstdiff
+
+# Variable labels for regression table 1
+names(attributes(vdem2))
+
+colnames(vdem2)
+# add one; must be same length of ncol(dat)
+
+label_matrix$vars2
+
+attr(vdem2, "model.varnames") <- label_matrix$vars2
+
+# check it out
+names(attributes(vdem2))
+
+print(attr(vdem2,"model.varnames"))
+
+stargazer(mod1w,mod1b, mod1f, 
+          type = "html",
+          covariate.labels = attr(vdem2,"model.varnames")[c(7:9, 20:21)],
+          dep.var.labels = attr(vdem2,"model.varnames")[1],
+          column.labels = c("Model 1-Pool", "Model 1-Within", "Model 1-Between", "Model 1-First Differences"),
+          title = "Effects of Disinformation on Electoral Violence",
+          notes = c("Source: V-Dem Institute, 2022 <br>",
+                    "Y was transformed via square root; results are for <span>&#8730;</span> Y"),
+          out = "Images/RegressionOutput.html")
+
+print(attr(vdem2,"model.varnames")[21])
+# second model
+stargazer(mod2p,mod2w,mod2t,mod2b,mod2f,
+          type = "html",
+          covariate.labels = attr(vdem2,"model.varnames")[c(7:18)],
+          dep.var.labels = attr(vdem2,"model.varnames")[20],
+          column.labels = c("Model 2-Pool", "Model 2-Within", "Model 2-With-TE","Model 2-Between", "Model 2-First Differences"),
+          title = "Effects of Government Policy Approaches on Disinformation",
+          notes=c("Source: V-Dem Institute, 2022 <br>",
+                  "Y was transformed via square root; results are for <span>&#8730;</span> Y"),
+          out = "Images/RegressionOutput2.html")
+
+print(disinfo_formula)
+
+# Sample Counts Per Year
+
+#stargazer(group_by_year_ss, summary=F,
+          #type = "html",min.max=TRUE, mean.sd = TRUE, 
+         # nobs = FALSE, median = FALSE, iqr = FALSE,no.space=T,
+          #digits=1, align=T,
+          #title = "Sample Size per Year",
+          #out = "Images/samplesize.html")
+
+
+
+
+```
+```
+
