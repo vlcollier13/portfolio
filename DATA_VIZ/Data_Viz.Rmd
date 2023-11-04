@@ -1,0 +1,762 @@
+---
+title: "Political Polarization"
+author: "Vanessa Collier, Data Analytics and Policy, Johns Hopkins University"
+date: "`r Sys.Date()`"
+output:
+  tufte::tufte_html:
+    css: style.css
+    toc: no
+    #toc_depth: 
+    runtime: shiny 
+  tufte::tufte_handout:
+    citation_package: natbib
+    latex_engine: xelatex
+  tufte_features:
+    citation_package: natbib
+    latex_engine: xelatex
+    tufte::tufte_book: null
+  tufte::tufte_book: default
+link-citations: yes
+classoption: landscape
+subtitle: Data Visualization Portfolio
+bibliography: skeleton.bib
+---
+
+<!-- <img src="https://scx2.b-cdn.net/gfx/news/2017/politicalpol.jpg" style=" -->
+<!--   position: absolute; -->
+<!--   top: 250px; -->
+<!--   height:300px; -->
+<!--   width:400px; -->
+<!--   "> -->
+  
+  <img src="https://scx2.b-cdn.net/gfx/news/2017/politicalpol.jpg" alt="Political Polling Image" style="height:400px; width:500px; display: block; margin-bottom: 20px;">
+<br>
+
+<a name="Contents"></a>
+
+<h1> Contents </h1>
+<div id="section-TOC">
+<ul>
+<li style="list-style-type:none;"><a href="#section-overview">Overview</a></li>
+<li style="list-style-type:none;"><a href="#section-research-questions">Research Questions</a></li>
+<li style="list-style-type:none;"><a href="#section-data-sources">Data Sources</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-1-measurement-of-media-bias---treemap">Graph 1: Measurement of Media Bias - Treemap</a></li>
+
+<li style="list-style-type:none;"><a href="#section-graph-2-perceptions-of-fake-news---small-multiple-waffle-charts">Graph 2: Perceptions of “Fake News” - Small Multiple Waffle Charts</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-3-trust-ratings-of-news-sources-circular-barchart">Graph 3: Trust Ratings of News Sources-Circular Barchart</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-4-approvaldisapproval-ratings-for-parties">Graph 4: Approval/Disapproval Ratings for Parties</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-5-average-ideology-scores-for-congresses-over-time">Graph 5: Average Ideology Scores for Congresses Over Time</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-6-density-of-ideology-scores-in-congress">Graph 6: Density of Ideology Scores in Congress</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-7-rates-of-bill-co-sponsorship-across-party-lines-in-116th-congress---bubble-chart">Graph 7: Rates of Bill Co-Sponsorship Across Party Lines in 116th Congress - Bubble Chart</a></li>
+<li style="list-style-type:none;"><a href="#section-graph-8-interactive-data-dashboard-using-pandar-and-shiny">Graph 8: Interactive Data Dashboard using PandaR and Shiny</a></li>
+</ul>
+</div>
+
+# Overview
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<ol></ol>
+The aim of the data visualizations presented is to explore the trends of political polarization across 3 broad categories:
+American media, public opinion and Congress.
+
+# Research Questions
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<ol> 
+<li>How has political polarization changed over time?</li>
+<li>Where are Americans getting their political information?</li>
+<li>Do Americans trust their political news sources? </li>
+<li>Has Congress changed their ideological stance as a collective?</li>
+<li>Is there evidence that bipartisanship exists and to what extent?</li>
+</ol>
+
+# Data Sources
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<ol>
+<li><a href="https://www.allsides.com/media-bias/media-bias-ratings">AllSides.com</a> </li>
+<li>Pew Research Center Journalism & Media,“Fake News”, 2016 </li> 
+<li>Pew Research Center for the People & the Press,“Typology”, 2017 </li>
+<li>Lewis, Jeffrey B., Keith Poole, Howard Rosenthal, Adam Boche, Aaron Rudkin, and Luke Sonnet (2020). <a href="https://voteview.com/">Voteview: Congressional Roll-Call Votes Database.</a>   </li>
+<li><a href="https://www.govtrack.us/congress/members/report-cards/2018/senate/cosponsored-other-party"> GovTrack 2018 Report Cards</a> </li>
+</ol>
+<br>
+
+# Graph 1: Measurement of Media Bias - Treemap
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<h3> Context & Observations </h3>
+-Area of each square is proportional to audience size <br>
+-Data comes from proprietary media bias detection algorithm
+<br>
+```{r echo=FALSE, error=FALSE, fig.height=8, fig.width=10, message=FALSE, warning=FALSE, strip.white=TRUE}
+library(tidyverse)
+library(tufte)
+library(ggplot2)
+library(ggthemes)
+library(tufte)
+library(rsconnect)
+library(rmarkdown)
+
+
+
+options(scipen = 999)  # turn off scientific notations 
+
+# Read data
+allsides <- read_csv("Data/allsides.csv") 
+
+
+#  limit to top 20 news sources
+allsides2 <- allsides %>% top_n(25)
+
+
+library(tidyverse)
+library(RColorBrewer)
+library(treemap)
+library(treemapify)
+# plot
+
+#define colors
+palette= c("#ad6ceb", "#001AFF","dodgerblue","#FA0808","#FF8080" )
+treemap <- ggplot(allsides2, aes(area = total_votes, fill = bias, 
+                  label=name, subgroup=bias,layout="scol", type="value")) +
+  geom_treemap()+
+  scale_fill_manual(values = palette)+
+  geom_treemap_text(family="Gill Sans",min.size=14,face="bold",reflow=TRUE,grow=FALSE)+
+  geom_treemap_subgroup_border()+
+  labs(title="Media Bias in U.S. News Sources",
+       caption="Source: allsides.com",
+       fill="Bias")+
+  theme_tufte()+
+    theme(
+      plot.title = element_text(family="Gill Sans",size = 20),
+      plot.caption = element_text(family="Gill Sans",size = 14, face = "italic"),
+      plot.subtitle=element_text(family="Gill Sans",size=16),
+      plot.margin = unit(c(1.5,1.5,1.5,1.5), "cm"),
+      legend.title = element_text(family="Gill Sans",color="black", size = 16),
+      legend.text = element_text(family="Gill Sans",color="black",size = 14),
+      legend.key.size = unit(2, "cm"),
+    legend.key.width = unit(2,"cm"))
+    
+print(treemap)
+
+```
+
+# Graph 2: Perceptions of "Fake News" - Small Multiple Waffle Charts 
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<ol></ol>
+### Context & Observations
+
+-The majority of americans do not trust their news sources<br>
+-While they tend to pick up on inherent bias in reporting,
+they also underestimate the bias in their preferred sources<br>
+-The data shows that while many people accidentally shared fake news (80%),
+some actually share it intentionally (15%!)
+<br>
+```{r echo=FALSE, results=FALSE,error=FALSE, message=FALSE, warning=FALSE,strip.white=TRUE}
+library(tidyverse)
+library(haven)
+
+fakenews<- read_sav("Data/Fake_News.sav")
+#convert to factors
+pew1 <- factor(fakenews$pew1)
+pew2 <- factor(fakenews$pew2)
+pew3 <- factor(fakenews$pew3)
+pew4 <- factor(fakenews$pew4)
+pew5a <-factor(fakenews$pew5a)
+pew5b <-factor(fakenews$pew5b)
+pew5c <-factor(fakenews$pew5c)
+pew6 <- factor(fakenews$pew6)
+pew7 <- factor(fakenews$pew7)
+
+levels(pew1) <- c("Often", "Sometimes", "Hardly_ever", "Never", "Don't Know/Refused")
+levels(pew2) <- c("Often", "Sometimes", "Hardly_ever", "Never", "Don't Know/Refused")
+levels(pew3) <- c("Yes", "No", "Don't Know/Refused")
+levels(pew4) <- c("Yes", "No", "Don't Know/Refused")
+levels(pew5a) <- c("A great deal", "A fair amount","Not much", "None at all", "Don't Know/Refused")
+levels(pew5b) <- c("A great deal", "A fair amount","Not much", "None at all", "Don't Know/Refused")
+levels(pew5c) <- c("A great deal", "A fair amount","Not much", "None at all", "Don't Know/Refused")
+levels(pew6) <- c("Very", "Somewhat", "Not very", "Not at all", "Don't Know/Refused")
+levels(pew7) <- c("A great deal", "Some", "Not much","Not at all","Don't Know/Refused")
+# add categories for each question, making new tables
+table1 <- fct_count(pew1)
+table2 <- fct_count(pew2)
+table3 <- fct_count(pew3)
+table4 <- fct_count(pew4)
+table5a <- fct_count(pew5a)
+table5b <- fct_count(pew5b)
+table5c <- fct_count(pew5c)
+table6 <- fct_count(pew6)
+table7 <- fct_count(pew7)
+
+# Add percentage and Question to table
+table1 <- table1 %>% as_tibble() %>% mutate(
+      Percent = n/1002,Question="How often do you come across news stories about politics and government online that you think are not fully accurate?")
+table2 <- table2 %>% as_tibble() %>% mutate(Percent=n/1002, Question = "How often do you come across political news stories online that you think are completely made up?")
+table3 <- table3 %>% as_tibble() %>% mutate(Percent=n/1002, Question = "Have you ever shared a political news story online that you later found out was made up?")
+table4 <- table4 %>% as_tibble() %>% mutate(Percent=n/1002, Question = "Have you ever shared a political news story online that you thought AT THE TIME was made up?")
+table5a <-table5a %>% as_tibble() %>% mutate(Percent=n/1002,Question = "How much responsibility do members of the public have in trying to prevent made up stories from gaining attention?")
+table5b <-table5b %>% as_tibble() %>% mutate(Percent=n/1002,Question = "How much reponsibility do the government, politicians, and elected officials have in trying to prevent made up stories from gaining attention?")
+table5c <-table5c %>% as_tibble() %>% mutate(Percent=n/1002,Question = "How much responsibility do social networking and search sites have in trying to prevent made up stories from gaining attention?")
+table6 <-table6 %>% as_tibble() %>% mutate(Percent=n/1002, Question = "How confident are you in your own ability to recognize news that is made up?")
+table7 <-table7 %>% as_tibble() %>% mutate(Percent=n/1002, Question = "How much do you think these kinds of news stories leave Americans confused about the basic facts of current events?")
+
+# Add a new variable to round the percentage
+names(table1)[1]="Response"
+round(table1$Percent,digits=1)
+table1 <- table1 %>% mutate(rounded=round(Percent,digits=1))
+names(table2)[1]="Response"
+round(table2$Percent,digits=1)
+table2 <- table2 %>% mutate(rounded=round(Percent,digits=1))
+names(table3)[1]="Response"
+round(table3$Percent,digits=1)
+table3 <- table3 %>% mutate(rounded=round(Percent,digits=1))
+names(table4)[1]="Response"
+round(table4$Percent,digits=1)
+table4 <- table4 %>% mutate(rounded=round(Percent,digits=1))
+# Table 5a
+names(table5a)[1]="Response"
+round(table5a$Percent,digits=1)
+table5a <- table5a %>% mutate(rounded=round(Percent,digits=1))
+### Table 5b
+names(table5b)[1]="Response"
+round(table5b$Percent,digits=1)
+table5b <- table5b %>% mutate(rounded=round(Percent,digits=1))
+### Table 5c
+names(table5c)[1]="Response"
+round(table5c$Percent,digits=1)
+table5c <- table5c %>% mutate(rounded=round(Percent,digits=1))
+### Table 6
+names(table6)[1]="Response"
+round(table6$Percent,digits=1)
+table6 <- table6 %>% mutate(rounded=round(Percent,digits=1))
+### Table 7
+names(table7)[1]="Response"
+round(table7$Percent,digits=1)
+table7 <- table7 %>% mutate(rounded=round(Percent,digits=1))
+###############################################################################
+```
+
+```{r echo=FALSE, results=FALSE,error=FALSE, message=FALSE, warning=FALSE,strip.white=TRUE,fig.height=2.5,fig.width=9}
+# waffle 1 
+library(waffle)
+library(tidyverse)
+library(ggplot2)
+
+parts1 <- c(`Often` =50, `Sometimes` = 30, `Hardly Ever` = 10, `Never` = 10)
+waffletheme <-theme(plot.title = element_text(family="Gill Sans",hjust = 0.5,size = 14),
+        axis.title.x= element_text(family="Gill Sans",color="black", size = 14),
+        legend.title = element_text(family="Gill Sans",color="black", face="bold", size = 14),
+        legend.text = element_text(family="Gill Sans",color="black",size = 14),
+        legend.key.size = unit(1, "cm"),
+        legend.key.width = unit(1,"cm"),
+        plot.caption = element_text(family="Gill Sans",size = 12, face = "italic")
+        
+        
+)
+waffle1 <-waffle(
+  parts1, rows = 5, size = 1.5, 
+  colors = c("#FA0808", "goldenrod2", "#001AFF","dodgerblue"), 
+  legend_pos = "bottom",
+  xlab = "Proportion of Respondents", 
+  title=str_wrap(table1$Question, width = 80, indent = 0, exdent = 0)
+)
+waffle1 + waffletheme
+
+
+###############Waffle 2 #####################
+parts2 <- c(`Often` =30, `Sometimes` = 40, `Hardly Ever` = 10, `Never` = 10)
+
+waffle2 <-waffle(
+  parts2, rows = 5, size = 1.5, 
+  colors = c("#FA0808", "goldenrod2", "#001AFF","dodgerblue"), 
+  legend_pos = "bottom",
+  xlab = "Proportion of Respondents",
+  title=str_wrap("How often do you come across political news stories online that you think are completely made up?", width = 80, indent = 0, exdent = 0)
+)
+waffle2 +  waffletheme
+
+################### Waffle 3 #######################
+parts3 <- c(`Yes` =80, `No` = 20)
+
+waffle3 <-waffle(
+  parts3, rows = 5, size = 1.5, 
+  colors = c("#FA0808", "#001AFF"), 
+  legend_pos = "bottom",
+  xlab = "Proportion of Respondents",
+  title=str_wrap(table3$Question, width = 80, indent = 0, exdent = 0)
+)
+waffle3 + waffletheme
+
+##########################################
+parts4 <- c(`Yes` =15, `No` = 84, `Dont Know`=1)
+waffle4 <-waffle(
+  parts4, rows = 5, size = 1.5, 
+  colors = c("#FA0808", "#001AFF","#7F00FF"), 
+  legend_pos = "bottom",
+  xlab = "Proportion of Respondents",
+  title=str_wrap(table4$Question, width = 80, indent = 0, exdent = 0)
+)
+waffle4 + waffletheme
+
+########### waffle 5 
+
+parts7 <- c(`A great deal` =64, `Some` =25 , `Not much`=6,`Not at all`=4,`Dont Know`=1)
+waffle7 <-waffle(
+  parts7, rows = 5, size = 1.5, 
+  colors = c("#FA0808", "goldenrod2","#001AFF","#99CCFF","#7F00FF"), 
+  legend_pos = "bottom",
+  xlab = "Proportion of Respondents",
+  title=str_wrap(table7$Question, width = 80, indent = 0, exdent = 0)
+)
+waffle7 + waffletheme
+
+```
+<h3> Source: Pew Research Center</h3>
+<br>
+
+# Graph 3: Trust Ratings of News Sources-Circular Barchart
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<h3> Context & Observations: </h3>
+-The levels of trust and distrust are nearly equal for most news sources<br>
+-For example, Fox News and CNN both have high levels of trust AND distrust
+
+```{r CircularBar, echo=FALSE, error=FALSE, message=FALSE, warning=FALSE,results=FALSE,fig.width = 9, fig.height=9,strip.white=TRUE}
+
+
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(RColorBrewer)
+library(reshape2)
+library(readxl)
+
+trust <- read_xlsx("Data/NewsTrustPew.xlsx")
+
+#reshape data
+trust <- melt(trust,id=c("News_Source_Trust"))
+
+
+#rename
+trust <- trust %>%
+  rename(
+    individual= News_Source_Trust,
+    group=variable,
+    value=value)
+
+
+# remove some news groups for consolidation
+trust <- trust %>% arrange(group, value)
+trust <- trust %>% filter(!individual %in% c("Daily Caller","Univision","Vox","The Hill","Washington Examiner","Vice","Breitbart","Business Insider","Buzzfeed"))
+
+
+# recode not_heard_of
+trust$group<-recode(trust$group,"Not_heard_of"="Not Heard Of",.default=levels(trust$group))
+
+
+# recode Rush Limbaugh
+trust$individual<-recode(trust$individual,"Rush Limbaugh Show (radio)"="Rush Limbaugh")
+
+# recode Sean Hannity
+trust$individual<-recode(trust$individual,"Sean Hannity Show (radio)"="Sean Hannity")
+
+
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar=4
+to_add = data.frame( matrix(NA, empty_bar*nlevels(trust$group), ncol(trust)) )
+colnames(to_add) = colnames(trust)
+to_add$group=rep(levels(trust$group), each=empty_bar)
+trust=rbind(trust, to_add)
+trust=trust %>% arrange(group)
+trust$id=seq(1, nrow(trust))
+
+# Get the name and the y position of each label
+label_data=trust
+number_of_bar=nrow(label_data)
+angle= 90 - 360 * (label_data$id-0.5) /number_of_bar     #  substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_data$hjust<-ifelse( angle < -90, 1, 0)
+label_data$angle<-ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for base lines
+base_data <-trust %>% 
+  group_by(group) %>% 
+  summarize(start=min(id), end=max(id) - empty_bar) %>% 
+  rowwise() %>% 
+  mutate(title=mean(c(start, end)))
+
+# prepare a data frame for grid (scales)
+grid_data = base_data
+grid_data$end = grid_data$end[ c( nrow(grid_data), 1:nrow(grid_data)-1)] + 1
+grid_data$start = grid_data$start - 1
+grid_data=grid_data[-1,]
+
+# Make the plot
+p6 <- ggplot(trust, aes(x=as.factor(id), y=value, fill=group)) +  
+  
+  geom_bar(aes(x=as.factor(id), y=value, fill=group),stat="identity",width=0.1,alpha=0.3,
+            position=position_dodge2(padding = 1.0)) +
+  scale_fill_brewer(palette = "RdBu")+
+  labs(title="Trust Ratings of U.S.News",
+      caption="Source: Pew Research Center")+
+
+  # Add a value lines
+  geom_segment(data=grid_data, aes(x = end, y = 80, xend = start, yend = 80), colour = "black", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 60, xend = start, yend = 60), colour = "black", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 40, xend = start, yend = 40), colour = "black", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_data, aes(x = end, y = 20, xend = start, yend = 20), colour = "black", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+  
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(trust$id),4), y = c(20, 40, 60, 80), 
+           label = c("20", "40", "60","80") , family="Gill Sans",color="black", size=6 , angle=0, fontface="bold", hjust=1) +
+  
+  geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity",alpha=.7,width = .5)+
+  ylim(-100,120) +
+  theme_tufte() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(c(-1,-1,-1,-1), "cm"),
+    plot.title = element_text(family="Gill Sans",size=18,vjust=-18, hjust=0.5),
+    plot.caption = element_text(family="Gill Sans",vjust=-18,hjust=0),
+    plot.caption.position="plot"
+  ) +
+
+  coord_polar() + 
+  geom_text(data=label_data, aes(x=id, y=value+10, label=individual, hjust=hjust), 
+            color="black", family="Gill Sans",fontface="bold",alpha=0.6, size=4, angle=   label_data$angle, 
+            inherit.aes = FALSE ) +
+  
+  # Add base line information
+  geom_segment(data=base_data, aes(x = start, y = -5, xend = end, yend = -5), colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE )  +
+  geom_text(data=base_data, aes(x = title, y = -20, label=group),  
+            position=position_dodge(width=1),family="Gill Sans",hjust=c(1,1,0.2,0),vjust=c(2,0,-2,-.12), 
+            colour = "black", alpha=0.8, size=4, 
+            fontface="bold", inherit.aes = FALSE)
+
+p6
+
+```
+<h3> Source: Pew Research Center</h3>
+<br>
+
+# Graph 4: Approval/Disapproval Ratings for Parties 
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<h3>Context and Observations:</h3>
+-The Pew Center surveyed Americans on their perceptions of the Democratic & Republican parties<br>
+-Red shows disapproval rating and blue shows approval<br>
+-While these graphs tend to mirror each other, note how the gap is closing for the Democratic party, and widening for the Republican party <br>
+
+```{r echo=FALSE, results=FALSE,error=FALSE, message=FALSE, warning=FALSE,strip.white=TRUE,fig.width=12,fig.height=9}
+
+
+library(ggplot2)
+library(readxl)
+library(tidyverse)
+library(readxl)
+PartyFavor <- read_excel("Data/PartyFavor.xlsx")
+
+colors1 <- c("Approval" = "blue", "Disapproval" = "red")
+p <- ggplot() + 
+  geom_line(data = PartyFavor, 
+            aes(x = Year, y = Avg_Favorable, color = "Approval")) +
+  geom_line(data = PartyFavor, aes(x = Year, y = Avg_Unfavorable, color ="Disapproval")) +
+  labs(
+    title="Favorability Ratings for Democratic & Republican Parties",
+    subtitle="Average approval ratings among Americans surveyed",
+    caption="Source: Pew Research Center",
+    y="Average Favorable vs. Unfavorable",
+    color="Legend")+
+    scale_color_manual(values = colors1)+
+     xlim(2000,2018)+
+    ylim(0,100)+
+  
+    facet_wrap(Party ~ .)
+p+
+  theme(
+    plot.title=element_text(family="Gill Sans",size=20),
+    plot.subtitle=element_text(family="Gill Sans",size=16),
+    plot.caption=element_text(hjust=.5,family="Gill Sans",size=14),
+    axis.title=element_text(family="Gill Sans",size=16),
+    axis.text=element_text(family="Gill Sans",size=16),
+    strip.text = element_text(family="Gill Sans",size=16),
+    legend.position="right",
+    plot.margin = unit(c(1,4,1,1), "cm"),
+    legend.title = element_text(family="Gill Sans",color="black",size = 16),
+    legend.text = element_text(family="Gill Sans",color="black",size = 16),
+    legend.key.size = unit(2, "cm"),
+    legend.key.width = unit(2,"cm"),
+  )
+
+```
+
+
+```{r echo=FALSE, results=FALSE,error=FALSE,warning=FALSE,message=FALSE,strip.white=TRUE}
+
+
+library(tidyverse)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+# Subset data to 1970
+
+hsall <-read.csv("https://voteview.com/static/data/out/members/HSall_members.csv")
+hsall <- hsall %>% filter(congress>91)
+
+# remove president chamber
+hsall <- hsall %>% filter(chamber!="President")
+levels(hsall$chamber)
+# remove unneeded variables
+hsall <- select(hsall,-c(icpsr,state_icpsr,conditional,district_code,occupancy,last_means,bioguide_id,born,died))
+
+# create and label factors to replace party_code; remove independent-dem outlier
+unique(hsall$party_code)
+
+hsall<- hsall[which(hsall$party_code !="329"),]
+
+hsall <- hsall %>% mutate(party_factor = factor(party_code, 
+                  levels = c("100", "200", "112","328"),
+                  labels = c("Democratic","Republican", "Conservative",
+                             "Independent")))
+
+hsall <- na.omit(hsall)  
+# average scores for each congress's nominate_1 score
+avg_nom_dems <- hsall %>% 
+  group_by(congress) %>%
+  filter(party_factor=="Democratic")%>%
+  summarise(avg=mean(nominate_dim1))
+
+
+avg_nom_reps <- hsall %>%
+    group_by(congress) %>%
+    filter(party_factor =="Republican") %>%
+    summarise(avg=mean(nominate_dim1))
+ 
+
+#### Convert bioname from factor to string  
+library(dplyr)
+hsall<- hsall %>% mutate_if(is.factor, as.character) 
+class(hsall$bioname)
+class(hsall$nominate_dim1)
+
+```
+
+# Graph 5: Average Ideology Scores for Congresses Over Time 
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<ol></ol>
+<h3>Context and Observations:</h3>
+-Data comes from Voteview which allows users to download every congressional roll call vote in American history<br>
+-Data is coded by NOMINATE procedure, which uses spatial analysis to place congress members on liberal-conservative ideological map<br>
+-Note how the conservative scores expand to the right and the democratic scores stay relatively stable
+
+```{r echo=FALSE, results=FALSE,error=FALSE,warning=FALSE,message=FALSE,fig.height=12,fig.width=11,strip.white=TRUE}
+
+
+library(tidyverse)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+
+# Subset data to 1970
+
+hsall <-read.csv("https://voteview.com/static/data/out/members/HSall_members.csv")
+hsall <- hsall %>% filter(congress>91)
+
+# remove president chamber
+hsall <- hsall %>% filter(chamber!="President")
+levels(hsall$chamber)
+# remove unneeded variables
+hsall <- select(hsall,-c(icpsr,state_icpsr,conditional,district_code,occupancy,last_means,bioguide_id,born,died))
+
+# create and label factors to replace party_code; remove independent-dem outlier
+
+unique(hsall$party_code)
+
+hsall<- hsall[which(hsall$party_code !="329"),]
+
+hsall <- hsall %>% mutate(party_factor = factor(party_code, 
+                  levels = c("100", "200", "112","328"),
+                  labels = c("Democratic","Republican", "Conservative",
+                             "Independent")))
+
+hsall <- na.omit(hsall)  
+# average scores for each congress's nominate_1 score
+avg_nom_dems <- hsall %>% 
+  group_by(congress) %>%
+  filter(party_factor=="Democratic")%>%
+  summarise(avg=mean(nominate_dim1))
+
+
+avg_nom_reps <- hsall %>%
+    group_by(congress) %>%
+    filter(party_factor =="Republican") %>%
+    summarise(avg=mean(nominate_dim1))
+  
+#### Convert bioname from factor to string  
+library(dplyr)
+hsall<- hsall %>% mutate_if(is.factor, as.character) 
+class(hsall$bioname)
+class(hsall$nominate_dim1)
+
+#GRAPH 5 Dumbell Plot
+library(ggplot2)
+library(ggalt)
+theme_set(theme_bw())
+
+# Data Prep
+avg_dems_and_reps <- merge(avg_nom_reps,avg_nom_dems,by="congress")
+
+avg_dems_and_reps$congress <- factor(avg_dems_and_reps$congress,levels=as.character(avg_dems_and_reps$congress)) 
+
+# for right ordering of the dumbells
+class(avg_dems_and_reps)
+
+avg_dems_and_reps$congress <- factor(avg_dems_and_reps$congress, levels=as.character(avg_dems_and_reps$congress))  # for right ordering of the dumbells
+dumbell <- ggplot(avg_dems_and_reps, aes(x=avg.x, xend=avg.y, y=congress, group=congress)) + 
+        geom_dumbbell(size=1.5,
+                      color="#99CCFF",
+                      colour_x ="#FA0808",
+                      colour_xend  ="#001AFF") + 
+        scale_x_continuous(label=waiver()) + 
+        labs(x="Liberal                       Moderate                   Conservative",
+             y="",
+             title="Ideology Score Intervals for Congresses 92-116", 
+             caption="Source: www.voteview.org") +
+        theme(plot.margin = unit(c(1,1,1,1), "cm"),
+              plot.title = element_text(family="Gill Sans",size=20,hjust=0.5),
+              plot.caption=element_text(family="Gill Sans",size=16, face="italic"),
+              panel.grid.minor=element_blank(),
+              panel.grid.major.y=element_blank(),
+              panel.grid.major.x=element_line(),
+              axis.ticks=element_blank(),
+              axis.text=element_text(family="Gill Sans",size=18),
+              axis.title=element_text(family="Gill Sans",size=18,hjust=.35),
+              legend.position="top",
+              panel.border=element_blank())
+plot(dumbell)
+################################################################
+```
+
+# Graph 6: Density of Ideology Scores in Congress 
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<h3>Context & Observations:</h3>
+-Note: the ideology score range for "moderates" are minimally dense with little overlap between parties<br>
+-One hypothesis is that moderates tend to lose elections, or at least have less financial
+and systematic support from the party system<br>
+
+```{r echo=FALSE,results=FALSE,error=FALSE,warning=FALSE,message=FALSE,strip.white=TRUE,fig.height=11,fig.width=11}
+
+# Remove conservative and independent members
+
+dems_reps <- hsall %>% 
+  group_by(congress) %>%
+  filter(party_factor!="Independent")%>%
+  filter(party_factor!="Conservative")
+
+
+# Density plot to show distribution of nominate_dim1 
+p5 <- ggplot(dems_reps, aes(x=nominate_dim1)) + 
+  geom_density(aes(fill=factor(party_factor)), size=.3, alpha=0.7) + 
+  scale_fill_manual(values = c("#001AFF","#FA0808"), name="Political Party") + 
+  labs(x = "Ideology Score", y = "Density",
+       title = "Density of Ideology Scores in Congress since 1970",
+       caption = "Source: https://voteview.com")+
+  theme(      plot.title = element_text(family="Gill Sans",size=20,hjust=0.5),
+              plot.caption=element_text(family="Gill Sans",size=18, face="italic"),
+              axis.text=element_text(family="Gill Sans",size=18),
+              axis.title=element_text(family="Gill Sans",size=18),
+              legend.title = element_text(family="Gill Sans",color="black", size = 16),
+              legend.text = element_text(family="Gill Sans",color="black",size = 16),
+              plot.margin=unit(c(.5,.5,.9,.5),"cm")
+  )
+p5
+
+```
+
+# Graph 7: Rates of Bill Co-Sponsorship Across Party Lines in 116th Congress - Bubble Chart
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<h3>Context & Observations:</h3>
+-I wanted to look at the inverse of polarization, and see how much bipartisanship there is<br>
+-The highest rates of bipartisan co-sponsorship seem to be dominated by the Democratic party<br>
+-Since each bubble represents an individual member of Congress,it was necessary to hide the x-axis labels
+
+```{r echo=FALSE,results=FALSE,error=FALSE,warning=FALSE,message=FALSE,strip.white=TRUE,fig.height=13,fig.width=13}
+
+
+library(ggplot2)
+library(ggraph)
+library(tidyverse)
+library(readxl)
+library(hrbrthemes)
+library(viridis)
+library(RColorBrewer)
+library(plotly)
+
+bipartisan <- read.csv("Data/govtrack-2017-house-cosponsored-other-party.csv")
+
+member_id <- read_xlsx("Data/member_id.xlsx")
+
+# merge datasets 
+# rename
+colnames(member_id)
+colnames(bipartisan)
+
+names(member_id)[names(member_id)=="Member ID"]<- "bioguide_id"
+
+df <- merge(member_id,bipartisan,by = "bioguide_id")
+
+library(ggpubr)
+# The dataset is provided in the gapminder library
+data <- df
+
+# Most basic bubble plot
+
+graph7 <- data %>%
+  ggplot(aes(x=Member, y=cosponsored.other.party, size=percentile, fill=Party)) +
+  geom_point(alpha=0.5, shape=21, color="black") +
+  coord_cartesian(
+  xlim = c(-10,450),
+  ylim = c(0,80),
+  expand = FALSE,
+  default = FALSE,
+  clip = "on")+
+  scale_size(breaks=waiver(),range=c(2,10),
+             name = str_wrap("Member's Percentage of Bipartisan Co-Sponsored Bills",width = 30, indent = 0, exdent = 0))+
+    
+  labs(title = str_wrap("Bill Co-Sponsorship Across Party Lines in 116th Congress", width = 100, indent = 0, exdent = 0),caption="Source: Congress.gov")+
+  scale_fill_manual(aesthetics="fill",values = c("#0072B2","#D55E00","#FF0000"))+
+          theme_classic()+
+          theme(
+            panel.background = element_blank(),
+          plot.background=element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks = element_blank(),
+          axis.title= element_text(family="Gill Sans",size=18),
+          axis.text.y=element_text(family="Gill Sans",size=18),
+          plot.margin=unit(c(3,2,2,2),"cm"),
+          plot.title = element_text(family="Gill Sans",size=20,hjust=0.75,vjust = 3),
+          plot.caption=element_text(family="Gill Sans",size=18, face="italic"),
+          legend.key.size = unit(2, "cm"),
+          legend.key.width = unit(1,"cm"), 
+          legend.title = element_text(family="Gill Sans",size=18), 
+           legend.text = element_text(size=18)) + 
+  
+  guides(fill= guide_legend(override.aes = list(size=8, stroke=1.5))) 
+
+
+
+graph7
+```
+
+# Graph 8: Interactive Data Dashboard using PandaR and Shiny
+<a href="#Contents" style="font-size: 15px;">Top</a><br>
+<ol></ol>
+-PandaR is a package I learned about through the Shiny gallery on RStudio.<br> 
+-PandaR contains Shiny development features that you can customize.<br>
+-The interactive display below uses NOMINATE data from Voteview to let you explore the polarization of congress over time, and allows you to filter and sort data.<br>
+-Perhaps the most convincing evidence for increased polarization can be found by viewing the "By Group Chart", and selecting the options "party.mean.diff.d1", grouping by year, and unclicking the "sort by statistic box". <br>
+-This view gives you the party mean differential in order by year since 1879. <br>
+-Note that the party mean differential has increased since WWII, and the only other time it has been this large was the post civil war and reconstruction period. <br>
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<iframe src ="https://vanessa-collier.shinyapps.io/application/" height=1000px width=1100px />
+
+
